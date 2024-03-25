@@ -27,8 +27,8 @@ def main():
     existing_data = load_data()
     # Append the new data
     existing_data.extend(new_data_list)
-    # Filter out data older than 24 hours
-    cutoff = datetime.now() - timedelta(days=1)
+    # Filter out data older than 31 days
+    cutoff = datetime.now() - timedelta(days=31)
     filtered_data = [entry for entry in existing_data if datetime.strptime(entry['timestamp'], '%Y-%m-%d %H:%M:%S') > cutoff]
     
     save_data(filtered_data)

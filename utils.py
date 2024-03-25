@@ -144,7 +144,7 @@ def get_gpu_usage_in_pod(pod_name, namespace="informatics")->list[dict]:
 
 
 def get_pods_not_using_gpus_stats(namespace = "informatics")->list[dict]:
-    config.load_kube_config()
+    config.load_kube_config("/kubernetes/config")
 
     # Create a Kubernetes API client
     v1 = client.CoreV1Api()
