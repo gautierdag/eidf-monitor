@@ -56,6 +56,8 @@ def filter_while_true_pods():
             })
     return while_true_pods
 
+
+
 def get_pods_not_using_gpus(namespace: str = "informatics") -> list[dict]:
     config.load_kube_config()
 
@@ -67,36 +69,108 @@ def get_pods_not_using_gpus(namespace: str = "informatics") -> list[dict]:
     # List all running pods in the specified namespace
     ret = v1.list_namespaced_pod(namespace)
     for pod in ret.items:
-        if pod.status.phase == "Running":
-            # Command to count the number of GPUs
-            gpu_count_cmd = "nvidia-smi --list-gpus | wc -l"
-            # Command to get memory usage of each GPU
-            gpu_mem_cmd = "nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits"
+        # check if the pod is running
+        if pod.status.phase != "Running":
+            continue
+        # check if the pod is using GPUs
+        if not any("nvidia.com/gpu" in container.resources.limits for container in pod.spec.containers):
+            continue
 
-            try:
-                # Execute commands in the pod
-                gpu_count = stream(v1.connect_get_namespaced_pod_exec, pod.metadata.name, namespace,
-                                   command=['/bin/sh', '-c', gpu_count_cmd],
-                                   stderr=True, stdin=False,
-                                   stdout=True, tty=False)
+        # Command to count the number of GPUs
+        gpu_count_cmd = "nvidia-smi --list-gpus | wc -l"
+        # Command to get memory usage of each GPU
+        gpu_mem_cmd = "nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits"
 
-                gpu_memories = stream(v1.connect_get_namespaced_pod_exec, pod.metadata.name, namespace,
-                                      command=['/bin/sh', '-c', gpu_mem_cmd],
-                                      stderr=True, stdin=False,
-                                      stdout=True, tty=False)
+        try:
+            # Execute commands in the pod
+            gpu_count = stream(v1.connect_get_namespaced_pod_exec, pod.metadata.name, namespace,
+                                command=['/bin/sh', '-c', gpu_count_cmd],
+                                stderr=True, stdin=False,
+                                stdout=True, tty=False)
 
-                # Process the outputs
-                num_gpus = int(gpu_count.strip())
-                gpu_memories = [int(x) for x in gpu_memories.split("\n") if x]
-                if all(mem < 100 for mem in gpu_memories):
-                    if num_gpus > 0:
-                        entry = {
-                            'pod': pod.metadata.name,
-                            'namespace': namespace,
-                            'num_gpus': num_gpus
-                        }
-                        res += [entry]
+            gpu_memories = stream(v1.connect_get_namespaced_pod_exec, pod.metadata.name, namespace,
+                                    command=['/bin/sh', '-c', gpu_mem_cmd],
+                                    stderr=True, stdin=False,
+                                    stdout=True, tty=False)
 
-            except Exception as e:
-                print(f"Error executing command in pod {pod.metadata.name}: {e}")
+            # Process the outputs
+            num_gpus = int(gpu_count.strip())
+            gpu_memories = [int(x) for x in gpu_memories.split("\n") if x]
+            if all(mem < 100 for mem in gpu_memories):
+                if num_gpus > 0:
+                    entry = {
+                        'pod': pod.metadata.name,
+                        'namespace': namespace,
+                        'num_gpus': num_gpus
+                    }
+                    res += [entry]
+
+        except Exception as e:
+            print(f"Error executing command in pod {pod.metadata.name}: {e}")
     return res
+
+
+def get_gpu_usage_in_pod(pod_name, namespace="informatics")->list[dict]:
+    # Create a Kubernetes API client
+    v1 = client.CoreV1Api()
+
+    # Command to get stats of each GPU
+    gpu_mem_cmd = "nvidia-smi --query-gpu=gpu_name,memory.used,memory.free,memory.total,utilization.gpu,utilization.memory --format=csv,noheader,nounits"
+
+    try:
+        gpu_memories = stream(v1.connect_get_namespaced_pod_exec, pod_name, namespace,
+                                command=['/bin/sh', '-c', gpu_mem_cmd],
+                                stderr=True, stdin=False,
+                                stdout=True, tty=False)
+
+        # Process the outputs
+        # num_gpus = int(gpu_count.strip())
+        gpu_memories = [x for x in gpu_memories.split("\n") if x]
+        gpu_memories = [x.split(",") for x in gpu_memories]
+        gpu_memories = [{
+            'gpu_name': x[0],
+            'memory_used': int(x[1].split()[0]),
+            'memory_free': int(x[2].split()[0]),
+            'memory_total': int(x[3].split()[0]),
+            'gpu_util': int(x[4].split()[0]),
+            'memory_util': int(x[5].split()[0])
+        } for x in gpu_memories]
+
+        return gpu_memories
+
+    except Exception as e:
+        print(f"Error executing command in pod {pod_name}: {e}")
+        return []
+
+
+def get_pods_not_using_gpus_stats(namespace = "informatics")->list[dict]:
+    config.load_kube_config()
+
+    # Create a Kubernetes API client
+    v1 = client.CoreV1Api()
+
+    # List all running pods in the specified namespace
+    ret = v1.list_namespaced_pod(namespace)
+
+    data = []
+    for pod in ret.items:
+        # check if the pod is running
+        if pod.status.phase != "Running":
+            continue
+        # check if the pod is using GPUs
+        if not any("nvidia.com/gpu" in container.resources.limits for container in pod.spec.containers):
+            continue
+        
+        pod_name = pod.metadata.name
+        username = pod.metadata.labels["eidf/user"].replace("-infk8s", "")
+        pod_id = pod.metadata.uid
+        gpu_usage = get_gpu_usage_in_pod(pod_name)
+        if len(gpu_usage) == 0:
+            continue
+        data.append({
+            "pod_name": pod_name,
+            "username": username,
+            "pod_id": pod_id,
+            "gpu_usage": gpu_usage
+        })
+    return data
