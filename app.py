@@ -5,30 +5,46 @@ import plotly.express as px
 FILE_PATH = "/nfs/user/s2234411-infk8s/cluster_gpu_usage.json"
 
 
-df = pd.read_json(FILE_PATH)
-df = df.explode("gpu_usage")
-df = df.join(df.gpu_usage.apply(pd.Series), how="left").drop("gpu_usage", axis=1)
-df["gpu_mem_used"] = df["memory_used"] / df["memory_total"] * 100
-df["inactive"] = df["gpu_mem_used"] < 1
+st.button("Refresh")
 
+st.markdown("""
+# Informatics EIDF Monitoring Dashboard
+This dashboard shows the GPU usage in the cluster. 
+            
+The data is collected from the Kubernetes cluster every 5 minutes.
+Active GPUs are those with memory usage greater than 1% in the last 5 minutes.
+""")
 
-# fix colors
-gpu_names = set(df.gpu_name.unique())
-colors = px.colors.qualitative.Plotly
-color_map = {gpu_name: colors[i] for i, gpu_name in enumerate(gpu_names)}
+def get_data()->pd.DataFrame:
+    df = pd.read_json(FILE_PATH)
+    df = df.explode("gpu_usage")
+    df = pd.concat([df, df.gpu_usage.apply(pd.Series)], axis=1).drop("gpu_usage", axis=1)
+    df["gpu_mem_used"] = df["memory_used"] / df["memory_total"] * 100
+    df["inactive"] = df["gpu_mem_used"] < 1
+    return df
 
+def get_colors(df: pd.DataFrame)->dict:
+    gpu_names = set(df["gpu_name"].unique())
+    colors = px.colors.qualitative.Plotly
+    color_map = {gpu_name: colors[i] for i, gpu_name in enumerate(gpu_names)}
+    return color_map
+
+df = get_data()
+color_map = get_colors(df)
 
 # plot current usage, stacked bar chart per user
 latest_timestamp = df["timestamp"].max()
 current_df = df[df["timestamp"] == latest_timestamp].copy()
 
-current_usage_df = current_df.groupby(["username", "gpu_name"]).agg({"gpu_name": "count", "inactive": "sum", "memory_free": "sum"}).rename(columns={"gpu_name": "count"}).reset_index()
+current_usage_df = current_df.groupby(["username", "gpu_name"]).agg({"gpu_name": "count", "inactive": "sum", "memory_free": "sum", "pod_name": list}).rename(columns={"gpu_name": "count"}).reset_index()
 # count total as well
 current_usage_df["count_total"] = current_usage_df.groupby("username")["count"].transform("sum")
 current_usage_df["count_total_inactive"] = current_usage_df.groupby("username")["inactive"].transform("sum")
 
 current_usage_df["memory_free"] = current_usage_df["memory_free"] / 1024 
 current_usage_df["memory_free_total"] = current_usage_df.groupby("username")["memory_free"].transform("sum")
+
+current_usage_df["pod_name"] = current_usage_df["pod_name"].apply(lambda x: ", ".join(set(x)))
 
 # plot current usage per user
 sorted_df = current_usage_df.sort_values(by="count_total", ascending=False)
@@ -39,6 +55,7 @@ fig = px.bar(current_usage_df,
              title="Current GPU usage per user",
              color_discrete_map=color_map,
              category_orders={'username': sorted_df['username'].tolist()},
+             hover_data={"pod_name": True},
              labels={"count": "Number of GPUs"})
 
 st.plotly_chart(fig, use_container_width=True)
@@ -52,6 +69,7 @@ fig = px.bar(current_usage_df[current_usage_df["inactive"] > 0],
                 color="gpu_name",
                 color_discrete_map=color_map,
                 category_orders={'username': sorted_df['username'].tolist()},
+                hover_data={"pod_name": True},
                 labels={"inactive": "Number of Inactive GPUs"})
 st.plotly_chart(fig, use_container_width=True)
 
@@ -66,6 +84,7 @@ fig = px.bar(current_usage_df,
                 color="gpu_name",
                 color_discrete_map=color_map,
                 category_orders={'username': sorted_df['username'].tolist()},
+                hover_data={"pod_name": True},
                 labels={"memory_free": "Memory free (GB)"})
 st.plotly_chart(fig, use_container_width=True)
 
