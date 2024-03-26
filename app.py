@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+from utils import filter_while_true_pods
+
 FILE_PATH = "/nfs/user/s2234411-infk8s/cluster_gpu_usage.json"
 
 
@@ -25,6 +27,13 @@ def get_data() -> pd.DataFrame:
             g["gpu_id"] = i
             new_list.append(g)
         return new_list
+
+    interactive_pods = filter_while_true_pods()
+    is_interactive = set()
+    for pod in interactive_pods:
+        is_interactive.add(pod["name"])
+
+    df["is_interactive"] = df["pod_name"].isin(is_interactive)
 
     df["gpu_usage"] = df["gpu_usage"].apply(add_gpu_id)
     df = df.explode("gpu_usage")
@@ -67,7 +76,7 @@ for col, (gpu_name, count) in zip(cols, gpu_counts.items()):
 
 st.data_editor(
     df.groupby("pod_name")
-    .agg({"username": "first", "gpu_mem_used": list})
+    .agg({"username": "first", "is_interactive": "any", "gpu_mem_used": list})
     .reset_index(),
     column_config={
         "gpu_mem_used": st.column_config.LineChartColumn(
@@ -82,8 +91,11 @@ st.data_editor(
     use_container_width=True,
 )
 
-# aveerage user usage in last hour
-last_hour_df = df[df["timestamp"] > latest_timestamp - pd.Timedelta(hours=1)]
+# average user usage in last hour
+last_hour_df = df[
+    (df["timestamp"] > latest_timestamp - pd.Timedelta(hours=1))
+    & (df["pod_name"].isin(current_df["pod_name"].unique()))
+]
 last_hour_df = (
     last_hour_df.groupby(["pod_name", "gpu_id"])
     .agg(
