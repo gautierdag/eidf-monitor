@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-from utils import filter_while_true_pods
+from utils import filter_while_true_pods, get_pending_pods
 
 FILE_PATH = "/nfs/user/s2234411-infk8s/cluster_gpu_usage.json"
 
@@ -13,8 +13,8 @@ st.markdown("""
 # Informatics EIDF Monitoring Dashboard
 This dashboard shows the GPU usage in the cluster. 
             
-The data is collected from the Kubernetes cluster every 5 minutes.
-Active GPUs are those with memory usage greater than 1% in the last 5 minutes.
+The data is collected from the Kubernetes cluster every 15 minutes.
+Active GPUs are those with memory usage greater than 1% in the last hour.
 """)
 
 
@@ -58,40 +58,6 @@ color_map = get_colors(df)
 # plot current usage, stacked bar chart per user
 latest_timestamp = df["timestamp"].max()
 current_df = df[df["timestamp"] == latest_timestamp].copy()
-
-# show current global counts
-gpu_counts = current_df.gpu_name.value_counts()
-cols = st.columns(len(gpu_counts))
-for col, (gpu_name, count) in zip(cols, gpu_counts.items()):
-    with col:
-        st.metric(
-            f"Active {gpu_name}",
-            count,
-            delta=None,
-            delta_color="normal",
-            help=None,
-            label_visibility="visible",
-        )
-
-
-st.data_editor(
-    df.groupby("pod_name")
-    .agg({"username": "first", "is_interactive": "any", "gpu_mem_used": list})
-    .reset_index(),
-    column_config={
-        "gpu_mem_used": st.column_config.LineChartColumn(
-            "GPU Memory Utilization (%)",
-            # width="medium",
-            help="Memory utilization of the GPUs in the pod over time",
-            y_min=0,
-            y_max=100,
-        ),
-    },
-    hide_index=True,
-    use_container_width=True,
-)
-
-# average user usage in last hour
 last_hour_df = df[
     (df["timestamp"] > latest_timestamp - pd.Timedelta(hours=1))
     & (df["pod_name"].isin(current_df["pod_name"].unique()))
@@ -110,6 +76,129 @@ last_hour_df = (
     .reset_index()
 )
 
+last_day_df = df[
+    (df["timestamp"] > latest_timestamp - pd.Timedelta(days=1))
+    & (df["pod_name"].isin(current_df["pod_name"].unique()))
+]
+last_day_df = (
+    last_day_df.groupby(["pod_name", "gpu_id"])
+    .agg(
+        {
+            "username": "first",
+            "is_interactive": "any",
+            "gpu_mem_used": list,
+            "inactive": "all",
+            "gpu_name": "first",
+            "timestamp": "min",
+        }
+    )
+    .reset_index()
+    .rename(columns={"timestamp": "first_seen"})
+)
+
+# show current global counts
+gpu_counts = current_df.gpu_name.value_counts()
+
+pending_pods = get_pending_pods()
+gpu_counts["Pending"] = len(pending_pods)
+
+cols = st.columns(len(gpu_counts) + 1)
+for col, (gpu_name, count) in zip(cols[:-1], gpu_counts.items()):
+    with col:
+        st.metric(
+            f"{gpu_name}",
+            count,
+            delta=None,
+            delta_color="normal",
+            help=f"{gpu_name}",
+            label_visibility="visible",
+        )
+
+with cols[-1]:
+    st.metric(
+        "Total",
+        sum(gpu_counts),
+        delta=None,
+        delta_color="normal",
+        help=None,
+        label_visibility="visible",
+    )
+
+
+count_inactive_gpus_last_hour = last_hour_df["inactive"].sum()
+count_inactive_gpus_last_day = last_day_df["inactive"].sum()
+
+for col, count_inactive, time_period in zip(
+    st.columns(2),
+    [
+        count_inactive_gpus_last_hour,
+        count_inactive_gpus_last_day,
+    ],
+    ["hour", "day"],
+):
+    with col:
+        st.metric(
+            f"Inactive GPUs in the last {time_period}",
+            count_inactive,
+            delta=None,
+            delta_color="normal",
+            help=f"Number of GPUs with less than 1% memory usage in the last {time_period}",
+            label_visibility="visible",
+        )
+
+
+count_inactive_pods_last_hour = (
+    last_hour_df.groupby("pod_name")
+    .agg({"inactive": "all"})
+    .reset_index()["inactive"]
+    .sum()
+)
+count_inactive_pods_last_day = (
+    last_day_df.groupby("pod_name")
+    .agg({"inactive": "all"})
+    .reset_index()["inactive"]
+    .sum()
+)
+
+for col, count_inactive, time_period, help_message in zip(
+    st.columns(2),
+    [
+        count_inactive_pods_last_hour,
+        count_inactive_pods_last_day,
+    ],
+    ["hour", "day"],
+    [
+        "|".join(set(last_hour_df[last_hour_df["inactive"]].pod_name.unique())),
+        "|".join(set(last_day_df[last_day_df["inactive"]].pod_name.unique())),
+    ],
+):
+    with col:
+        st.metric(
+            f"Inactive Pods in the last {time_period}",
+            count_inactive,
+            delta=None,
+            delta_color="normal",
+            help=help_message,
+            label_visibility="visible",
+        )
+
+
+st.data_editor(
+    last_day_df,
+    column_config={
+        "gpu_mem_used": st.column_config.LineChartColumn(
+            "GPU Memory Utilization (%)",
+            # width="medium",
+            help="Memory utilization of the GPUs in the pod over 24hours",
+            y_min=0,
+            y_max=100,
+        ),
+    },
+    hide_index=True,
+    use_container_width=True,
+)
+
+# average user usage in last hour
 last_hour_usage_df = (
     last_hour_df.groupby(["username", "gpu_name"])
     .agg(

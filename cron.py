@@ -42,5 +42,8 @@ def main():
 
 
 if __name__ == "__main__":
-    print(f"Running main function at {datetime.now()}")
-    main()
+    while True:
+        print(f"Running main function at {datetime.now()}")
+        main()
+        # sleep for 15 minutes
+        time.sleep(15 * 60)

@@ -210,3 +210,20 @@ def get_pods_not_using_gpus_stats(namespace="informatics") -> list[dict]:
             }
         )
     return data
+
+
+def get_pending_pods(namespace="informatics") -> list[str]:
+    config.load_kube_config("/kubernetes/config")
+    # Create a Kubernetes API client
+    v1 = client.CoreV1Api()
+
+    # List all running pods in the specified namespace
+    ret = v1.list_namespaced_pod(namespace)
+
+    data = []
+    for pod in ret.items:
+        # check if the pod is running
+        if pod.status.phase == "Pending":
+            data.append(pod.metadata.name)
+
+    return data
