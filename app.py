@@ -325,3 +325,42 @@ fig = px.line(
     title="Inactive GPUs over time per user",
 )
 st.plotly_chart(fig, use_container_width=True)
+
+
+st.markdown("""
+### Current Node Usage
+""")
+
+MAX_CPU_COUNT = 192
+MAX_MEMORY_COUNT = 890
+MAX_GPU_COUNT = 8
+
+nodes_df = (
+    current_df.groupby(["node_name", "pod_name"])
+    .agg({"cpu_requested": "first", "memory_requested": "first", "gpu_name": "count"})
+    .reset_index()
+)
+nodes_df = (
+    nodes_df.groupby("node_name")
+    .agg({"cpu_requested": "sum", "memory_requested": "sum", "gpu_name": "sum"})
+    .reset_index()
+)
+nodes_df["cpu_requested"] = (
+    (nodes_df["cpu_requested"].astype(int) / MAX_CPU_COUNT) * 100
+).round(2)
+nodes_df["memory_requested"] = (
+    (nodes_df["memory_requested"].astype(int) / MAX_MEMORY_COUNT) * 100
+).round(2)
+nodes_df["gpu_name"] = ((nodes_df["gpu_name"].astype(int) / MAX_GPU_COUNT) * 100).round(
+    2
+)
+# rename columns
+nodes_df.sort_values("node_name", ascending=True, inplace=True)
+nodes_df = nodes_df.rename(
+    columns={
+        "cpu_requested": "CPU usage (%)",
+        "memory_requested": "Memory usage (%)",
+        "gpu_name": "GPU usage (%)",
+    }
+)
+st.dataframe(nodes_df, height=500, use_container_width=True, hide_index=True)
