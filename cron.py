@@ -30,8 +30,9 @@ def main():
     existing_data = load_data()
     # Append the new data
     existing_data.extend(new_data_list)
-    # Filter out data older than 31 days
-    cutoff = datetime.now() - timedelta(days=31)
+
+    # Delete out data older than 14 days
+    cutoff = datetime.now() - timedelta(days=14)
     filtered_data = [
         entry
         for entry in existing_data

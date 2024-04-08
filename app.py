@@ -90,11 +90,15 @@ last_day_df = (
             "inactive": "all",
             "gpu_name": "first",
             "timestamp": "min",
+            "cpu_requested": "last",
+            "memory_requested": "last",
         }
     )
     .reset_index()
     .rename(columns={"timestamp": "first_seen"})
 )
+last_day_df["cpu_requested"] = last_day_df["cpu_requested"].astype(int)
+last_day_df["memory_requested"] = last_day_df["memory_requested"].astype(int)
 
 # show current global counts
 gpu_counts = current_df.gpu_name.value_counts()

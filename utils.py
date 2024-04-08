@@ -174,6 +174,24 @@ def get_gpu_usage_in_pod(pod_name, namespace="informatics") -> list[dict]:
         return []
 
 
+def convert_cpu(cpu) -> int:
+    if cpu is None:
+        return 0
+    if "m" in cpu:
+        return int(cpu.replace("m", "")) / 1000
+    return int(cpu)
+
+
+def convert_memory(memory) -> int:
+    if memory is None:
+        return 0
+    if "Mi" in memory:
+        return int(memory.replace("Mi", "")) // 1024
+    if "Gi" in memory or "G" in memory:
+        return int(memory.replace("Gi", "").replace("G", ""))
+    return int(memory)
+
+
 def get_pods_not_using_gpus_stats(namespace="informatics") -> list[dict]:
     config.load_kube_config("/kubernetes/config")
 
@@ -203,10 +221,17 @@ def get_pods_not_using_gpus_stats(namespace="informatics") -> list[dict]:
             continue
         data.append(
             {
+                "node_name": pod.spec.node_name,
                 "pod_name": pod_name,
                 "username": username,
                 "pod_id": pod_id,
                 "gpu_usage": gpu_usage,
+                "cpu_requested": convert_cpu(
+                    pod.spec.containers[0].resources.requests.get("cpu", None)
+                ),
+                "memory_requested": convert_memory(
+                    pod.spec.containers[0].resources.requests.get("memory", None)
+                ),
             }
         )
     return data
